@@ -1,0 +1,6 @@
+fastapi~=0.115.7
+uvicorn
+aiogram~=3.17.0
+python-dotenv~=1.0.1
+asyncpg
+httpx~=0.28.1
