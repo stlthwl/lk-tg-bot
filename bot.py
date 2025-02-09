@@ -39,6 +39,7 @@ user_cache = {}
 class RegistrationStates(StatesGroup):
     """Registration of user state message"""
     waiting_for_email = State()
+    waiting_for_message_to_user = State()
 
 
 async def send_error(telegram_id):
@@ -87,7 +88,7 @@ async def send_main_menu(chat_id: int, message: types.Message = None, call: type
 
 @dp.callback_query(lambda call: call.data == buttons.get_button('appeals').data)
 async def appeals_callback(call: types.CallbackQuery):
-    """ Sending Appeals' buttons """
+    """ Sending Appeals button """
     try:
         builder = InlineKeyboardBuilder()
         for i in ['new_appeal', 'my_appeals']:
@@ -105,18 +106,18 @@ async def appeals_callback(call: types.CallbackQuery):
 
 @dp.callback_query(lambda call: call.data == buttons.get_button('my_appeals').data)
 async def user_appeals(call: types.CallbackQuery):
-    """ Show User Appeals """
+    """ Show User Appeals handler """
     try:
-        user_data = user_cache[call.message.chat.id]['user_data']
-        appeals = await appeal_service.get_user_appeals(user_data.get('id'))
-        print(appeals)
+        user_data = user_cache.get(call.message.chat.id, {}).get('user_data', {})  # Безопасный доступ к данным
+        user_cache[call.message.chat.id]['appeals'] = await appeal_service.get_user_appeals(user_data.get('id'))
+        appeals = user_cache[call.message.chat.id]['appeals']
 
         builder = InlineKeyboardBuilder()
         buttons_in_row = 2
         temp_buttons = []
         for appeal in appeals:
             button_text = f"#{appeal.get('case_id')} {appeal.get('case_header')}"
-            button_data = f"#{appeal.get('id')}{user_data.get('id')}"
+            button_data = f"appeal_{appeal.get('case_id')}_{user_data.get('id')}"
             temp_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=button_data))
 
             if len(temp_buttons) == buttons_in_row:
@@ -129,13 +130,189 @@ async def user_appeals(call: types.CallbackQuery):
         back_button = buttons.get_button('appeals')
         start_button = buttons.get_button('start')
         builder.row(*[
-            types.InlineKeyboardButton(text='🔙Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
             types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
         ])
         edited_repy_text = messages.get_message('total_appeals').text + str(len(appeals))
         await call.message.edit_text(text=edited_repy_text, reply_markup=builder.as_markup())
     except Exception as e:
         print(e)
+        await send_error(call.message.chat.id)
+
+
+@dp.callback_query(lambda call: call.data.startswith("appeal_"))
+async def appeal_callback_handler(call: types.CallbackQuery):
+    """ Show user appeal handler """
+    try:
+        callback_data = call.data.split("_")[1:]
+        appeal_id = callback_data[0]
+        # user_id = callback_data[1]
+        user_data = user_cache[call.message.chat.id]['user_data']
+        appeals = user_cache[call.message.chat.id]['appeals']
+        appeal = [i for i in appeals if appeal_id == str(i.get('case_id'))][0]
+
+        appeal_ticket = (f"Обращение #{appeal.get('case_number')}\n\n"
+                         f"Тема: {appeal.get('case_header')}\nСтатуc: {appeal.get('case_status')}\n"
+                         f"Приоритет: {appeal.get('case_priority')}\nДата: {appeal.get('case_create_date')}\n"
+                         f"Категория: {appeal.get('case_caregory')}\nПроект: {appeal.get('case_project')}\n"
+                         f"Оператор: {appeal.get('case_operator')}\nИнициатор: {appeal.get('case_initiator')}")
+
+        available_actions = actions.get_available_actions(user_data.get('role_id'), appeal.get('case_status_id'))
+
+        builder = InlineKeyboardBuilder()
+        back_button = buttons.get_button('my_appeals')
+        start_button = buttons.get_button('start')
+
+        action_buttons = []
+        if len(available_actions) != 0:
+            for action in available_actions:
+                if 'command_id' == list(action.keys())[-1]:
+                    action_buttons.append(types.InlineKeyboardButton(
+                        text=action.get('name'),
+                        callback_data=f"command_{action.get('command_id')}_appealId_{appeal_id}"
+                    ))
+                elif 'procedure' == list(action.keys())[-1]:
+                    action_buttons.append(types.InlineKeyboardButton(
+                        text=action.get('name'),
+                        callback_data=f"p-{action.get('procedure').get('name')}"
+                                      f"-a_id-{appeal_id}"
+                                      f"-s_id-{appeal.get('case_status_id')}"
+                    ))
+            builder.row(*action_buttons)
+
+        if user_data.get('role_id') == 14:
+            builder.add(types.InlineKeyboardButton(
+                text=buttons.get_button('message_to_user').text,
+                callback_data=f"message_to_user-appeal_id-{appeal_id}"
+            ))
+
+        builder.row(*[
+            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
+        ])
+
+        await call.message.edit_text(appeal_ticket, reply_markup=builder.as_markup())
+
+    except Exception as e:
+        print(f'appeal_callback_handler: {e.__str__()}')
+        await send_error(call.message.chat.id)
+
+
+@dp.callback_query(lambda call: call.data.startswith('message_to_user-'))
+async def message_to_user_handler(call: types.CallbackQuery, state: FSMContext):
+    try:
+        appeal_id = int(call.data.split('-')[-1])
+        appeals = user_cache[call.message.chat.id]['appeals']
+        appeal = [i for i in appeals if appeal_id == i.get('case_id')][0]
+        print(appeal)
+        user_cache[call.message.chat.id]['message_to_user'] = {
+            'target_telegram_id': appeal.get('initiator_telegram_id')
+        }
+        await bot.send_message(call.message.chat.id, 'Введите текст сообщения')
+        await state.set_state(RegistrationStates.waiting_for_message_to_user)
+        await call.answer()
+    except Exception as e:
+        print(f'user_appeal_message_handler: {e.__str__()}')
+        await send_error(call.message.chat.id)
+
+
+@dp.message(StateFilter(RegistrationStates.waiting_for_message_to_user))
+async def process_message_to_user(message: types.Message, state: FSMContext, bot: Bot):
+    try:
+        target_telegram_id = user_cache[message.chat.id]['message_to_user'].get('target_telegram_id')
+
+        if message.text:
+            # Отправляем текстовое сообщение
+            await bot.send_message(chat_id=target_telegram_id, text=message.text)
+        elif message.document:
+            # Отправляем документ
+            await bot.send_document(chat_id=target_telegram_id, document=message.document.file_id, caption=message.caption)
+        elif message.photo:
+             # Получаем file_id самой большой фотографии
+             photo_file_id = message.photo[-1].file_id
+             await bot.send_photo(chat_id=target_telegram_id, photo=photo_file_id, caption=message.caption)
+        # Добавьте обработку для других типов контента (видео, аудио и т.д.)
+        else:
+            await bot.send_message(message.chat.id, "Неподдерживаемый тип сообщения.")
+            await state.clear()  # Важно очистить состояние, если тип сообщения не поддерживается.
+            return
+
+        await bot.send_message(message.chat.id, 'Сообщение успешно отправлено пользователю.')
+        await state.clear()  # Очищаем состояние после успешной отправки
+
+    except Exception as e:
+        print(f'process_message_to_user: {e.__str__()}')
+        await send_error(message.chat.id, bot)
+
+
+# @dp.message(StateFilter(RegistrationStates.waiting_for_message_to_user))
+# async def process_message_to_user(message: types.Message, state: FSMContext):
+#     try:
+#         target_telegram_id = user_cache[message.chat.id]['message_to_user'].get('target_telegram_id')
+#         await bot.forward_message(
+#             chat_id=target_telegram_id,
+#             from_chat_id=message.chat.id,
+#             message_id=message.message_id
+#         )
+#         await bot.send_message(message.chat.id, 'Сообщение успешно отправлено')
+#     except Exception as e:
+#         print(f'process_message_to_user: {e.__str__()}')
+
+
+@dp.callback_query(lambda call: call.data.startswith('p-'))
+async def appeal_procedure_callback_handler(call: types.CallbackQuery):
+    try:
+        user_data = user_cache[call.message.chat.id].get('user_data')
+        call_data_list = call.data.split('-')
+        procedure_name = call_data_list[1]
+        appeal_id = call_data_list[-3]
+        appeal_status_id = call_data_list[-1]
+        available_actions = actions.get_available_actions(int(user_data.get('role_id')), int(appeal_status_id))
+
+        call_procedure = ''
+        for i in available_actions:
+            if 'procedure' in list(i.keys()):
+                if i.get('procedure').get('name') == procedure_name:
+                    call_procedure += f"{procedure_name}({int(appeal_id)}, {user_data.get('id')})"
+
+        builder = InlineKeyboardBuilder()
+        try:
+            button = buttons.get_button('my_appeals')
+            response = await appeal_service.call_procedure(call_procedure)
+            print(response)
+            builder.add(types.InlineKeyboardButton(text='Ок', callback_data=button.data))
+            await call.message.edit_text(text=response.get('message'), reply_markup=builder.as_markup())
+        except Exception as e:
+            print(e)
+            start_button = buttons.get_button('start')
+            builder.add(types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data))
+    except Exception as e:
+        print(f'appeal_procedure_callback_handler: {e.__str__()}')
+
+
+@dp.callback_query(lambda call: call.data.startswith('command_'))
+async def appeal_command_callback_handler(call: types.CallbackQuery):
+    """ Execute available appeal action by command_id and appeal_id """
+    try:
+        print(call.data)
+        call_back_data = call.data.split("_")
+        command_id = call_back_data[1]
+        appeal_id = call_back_data[-1]
+
+        builder = InlineKeyboardBuilder()
+        try:
+            button = buttons.get_button('my_appeals')
+            response = await appeal_service.execute_appeal_command(int(command_id), int(appeal_id))
+            print(response)
+            builder.add(types.InlineKeyboardButton(text='Ок', callback_data=button.data))
+            await call.message.edit_text(text=response.get('message'), reply_markup=builder.as_markup())
+        except Exception as e:
+            print(e)
+            start_button = buttons.get_button('start')
+            builder.add(types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data))
+            await call.message.edit_text('Не удалось выполнить действие', reply_markup=builder.as_markup())
+    except Exception as e:
+        print(f"appeal_command_callback_handler: {e}")
         await send_error(call.message.chat.id)
 
 
@@ -189,7 +366,11 @@ async def web_app_message_handler(message: types.Message):
             builder = InlineKeyboardBuilder()
             builder.add(types.InlineKeyboardButton(text='Да', callback_data='create_new_appeal'))
             builder.add(types.InlineKeyboardButton(text='Отмена', callback_data='appeals'))
-            await bot.send_message(message.chat.id, text='Прикрепите файл при необходимости.\nСохранить?', reply_markup=builder.as_markup())
+            await bot.send_message(
+                message.chat.id,
+                text='Прикрепите файл при необходимости.\nСохранить?',
+                reply_markup=builder.as_markup()
+            )
     except Exception as e:
         print(e)
         await send_error(message.from_user.id)

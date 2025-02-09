@@ -38,9 +38,11 @@ class Buttons:
             'my_appeals': Button('Мои обращения', 'my_appeals'),
             'lk': Button('servicedesk', {'url': 'https://lk.bingosoft-office.ru/'}),
             'link_telegram': Button('Привязать учетную запись', 'link_telegram'),
-            'back_to_start': Button('🔙Назад', '/start'),
-            'start': Button('🏚 В начало', '/start'),
-            'appeal_adding': Button('Добавить обращение', None)
+            'back_to_start': Button('<- Назад', '/start'),
+            'start': Button('<<-- В начало', '/start'),
+            'appeal_adding': Button('Добавить обращение', None),
+            'message_to_user': Button('Сообщение пользователю', 'message_to_user'),
+            'message_to_support': Button('Сообщение в поддержку', 'message_to_support')
         }
 
     def get_button(self, name):
@@ -62,30 +64,42 @@ class Actions:
         self.role_ids = {
             12: {  # Внешний пользователь
                 'statuses': {
-                    3: [{'name': 'Отозвать обращение', 'procedure_id': 61, 'command_id': 248}],
-                    4: [{'name': 'Отозвать обращение', 'procedure_id': 61, 'command_id': 248}],
+                    3: [{'name': 'Отозвать обращение', 'command_id': 248}],
+                    4: [{'name': 'Отозвать обращение', 'command_id': 248}],
                     5: [
-                        {'name': 'Отозвать обращение', 'procedure_id': 61, 'command_id': 248},
-                        {'name': 'Дать уточнение', 'procedure_id': 67, 'command_id': 254}
+                        {'name': 'Отозвать обращение', 'command_id': 248},
+                        # {'name': 'Дать уточнение', 'command_id': 254}
                     ],
-                    6: [{'name': 'Отозвать обращение', 'procedure_id': 61, 'command_id': 248}],
-                    7: [{'name': 'Завершить обращение', 'procedure_id': 69, 'command_id': 256}]
+                    6: [{'name': 'Отозвать обращение', 'command_id': 248}],
+                    7: [{'name': 'Завершить обращение', 'command_id': 256}]
                 }
             },
             14: {  # Оператор
                 'statuses': {
                     3: [
-                        {'name': 'Взять обращение на себя', 'procedure_id': 55, 'command_id': 242},
-                        {'name': 'Принять в работу', 'procedure_id': 58, 'command_id': 245},
+                        {
+                            'name': 'Взять обращение на себя',
+                            'procedure': {
+                                'name': 'public.telegram_appoint_appeal',
+                                'params': ['appeal_id', 'user_id']
+                            }
+                        },
+                        {'name': 'Принять в работу', 'command_id': 245},
                     ],
                     4: [
-                        {'name': 'Взять обращение на себя', 'procedure_id': 55, 'command_id': 242},
-                        {'name': 'Принять в работу', 'procedure_id': 58, 'command_id': 245},
+                        {
+                            'name': 'Взять обращение на себя',
+                            'procedure': {
+                                'name': 'public.telegram_appoint_appeal',
+                                'params': ['appeal_id', 'user_id']
+                            }
+                        },
+                        {'name': 'Принять в работу', 'command_id': 245},
                     ],
-                    6: [
-                        {'name': 'Запросить уточнение у внешнего пользователя', 'procedure_id': 60, 'command_id': 247},
-                        {'name': 'Предоставить решение по обращению', 'procedure_id': 80, 'command_id': 261},
-                    ]
+                    # 6: [
+                    #     {'name': 'Запросить уточнение у внешнего пользователя', 'command_id': 247},
+                    #     {'name': 'Предоставить решение по обращению', 'command_id': 261},
+                    # ]
                 }
             }
         }

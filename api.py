@@ -131,4 +131,28 @@ class Appeals:
         self.response = await send_post(payload)
         return self.response
 
+    async def execute_appeal_command(self, command_id, appeal_id):
+        payload = {
+            "data": {
+                "method": "execute_appeal_command",
+                "command_id": command_id,
+                "appeal_id": appeal_id
+            }
+        }
+
+        self.response = await send_post(payload)
+        return self.response
+
+    async def call_procedure(self, procedure):
+        payload = {
+            "data": {
+                "method": "call_procedure",
+                "procedure": procedure
+            }
+        }
+
+        self.response = await send_post(payload)
+        return self.response
+
+
 
