@@ -155,4 +155,20 @@ class Appeals:
         return self.response
 
 
+class Events:
+    def __init__(self):
+        self.response = None
+
+    async def create_event(self, clarification: dict):
+        payload = {
+            "data": {
+                "method": "create_event",
+                "clarification": clarification
+            }
+        }
+
+        self.response = await send_post(payload)
+        return self.response
+
+
 

@@ -60,59 +60,97 @@ class Buttons:
 
 class Actions:
     def __init__(self):
-        self.actions = None
-        self.role_ids = {
-            12: {  # Внешний пользователь
-                'statuses': {
-                    3: [{'name': 'Отозвать обращение', 'command_id': 248}],
-                    4: [{'name': 'Отозвать обращение', 'command_id': 248}],
-                    5: [
-                        {'name': 'Отозвать обращение', 'command_id': 248},
-                        # {'name': 'Дать уточнение', 'command_id': 254}
-                    ],
-                    6: [{'name': 'Отозвать обращение', 'command_id': 248}],
-                    7: [{'name': 'Завершить обращение', 'command_id': 256}]
+        self.actions = {
+            12: [
+                {
+                    'type': 'appeal',
+                    'name': 'Отозвать обращение',
+                    'procedure_id': 61,
+                    'procedure': 'abandon_appeal_close_status',
+                    'params': {
+                        'id': 'appeal_id',
+                        'user_id': 'user_id',
+                        'role_id': 'role_id'
+                    },
+                    'status_ids': [3, 4, 5, 6]
+                },
+                {
+                    'type': 'event',
+                    'name': 'Дать уточнение',
+                    'procedure_id': 67,
+                    'procedure': 'get_additional_appeal_information',
+                    'params': {
+                        'id': 'event_id',
+                        'user_id': 'user_id'
+                    },
+                    'status_ids': [5]
+                },
+                {
+                    'type': 'appeal',
+                    'name': 'Завершить обращение',
+                    'procedure_id': 69,
+                    'procedure': 'close_appeal_by_user',
+                    'params': {
+                        'id': 'appeal_id',
+                        'user_id': 'user_id'
+                    },
+                    'status_ids': [7]
                 }
-            },
-            14: {  # Оператор
-                'statuses': {
-                    3: [
-                        {
-                            'name': 'Взять обращение на себя',
-                            'procedure': {
-                                'name': 'public.telegram_appoint_appeal',
-                                'params': ['appeal_id', 'user_id']
-                            }
-                        },
-                        {'name': 'Принять в работу', 'command_id': 245},
-                    ],
-                    4: [
-                        {
-                            'name': 'Взять обращение на себя',
-                            'procedure': {
-                                'name': 'public.telegram_appoint_appeal',
-                                'params': ['appeal_id', 'user_id']
-                            }
-                        },
-                        {'name': 'Принять в работу', 'command_id': 245},
-                    ],
-                    # 6: [
-                    #     {'name': 'Запросить уточнение у внешнего пользователя', 'command_id': 247},
-                    #     {'name': 'Предоставить решение по обращению', 'command_id': 261},
-                    # ]
+            ],
+            14: [
+                {
+                    'type': 'appeal',
+                    'name': 'Взять обращение на себя',
+                    'procedure_id': 55,
+                    'procedure': 'take_appeal_on_myown',
+                    'params': {
+                        'id': 'appeal_id',
+                        'user_id': 'user_id'
+                    },
+                    'status_ids': [3, 4]
+                },
+                {
+                    'type': 'appeal',
+                    'name': 'Принять в работу',
+                    'procedure_id': 58,
+                    'procedure': 'take_appeal_into_work',
+                    'params': {
+                        'id': 'appeal_id',
+                        'user_id': 'user_id'
+                    },
+                    'status_ids': [3, 4]
+                },
+                {
+                    'type': 'event',
+                    'name': 'Запросить уточнение',
+                    'procedure_id': 60,
+                    'procedure': 'additional_appeal_information_for_operator',
+                    'params': {
+                        'id': 'event_id',
+                        'user_id': 'user_id'
+                    },
+                    'status_ids': [6]
+                },
+                {
+                    'type': 'appeal',
+                    'name': 'Предоставить решение',
+                    'procedure_id': 80,
+                    'procedure': 'finish_appeal_procedure',
+                    'params': {
+                        'id': 'appeal_id',
+                        'user_id': 'user_id',
+                        'role_id': 'role_id'
+                    },
+                    'status_ids': [6]
                 }
-            }
+            ]
         }
 
     def get_available_actions(self, role_id, status_id):
         """ return available actions list """
-        if role_id in self.role_ids and status_id in self.role_ids[role_id]['statuses']:
-            return self.role_ids[role_id]['statuses'][status_id]
-        else:
-            return []
+        return [i for i in self.actions.get(role_id) if status_id in i.get('status_ids')]
 
-
-
-
-
+    def get_action_by_procedure_id(self, role_id, procedure_id):
+        """ return action """
+        return [i for i in self.actions.get(role_id) if procedure_id == i.get('procedure_id')]
 
