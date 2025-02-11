@@ -34,8 +34,7 @@ async def register_telegram(telegram_id: int, token: str):
         await user_service.confirm_profile(telegram_id, token)
         await bot_send_message(telegram_id, "Профиль успешно подтвержден")
         return {
-            "message": f"telegram_id {telegram_id} is being processed!",
-            "token": token
+            "message": f"telegram_id {telegram_id} is being processed!"
         }
     except Exception as e:
         print(e)

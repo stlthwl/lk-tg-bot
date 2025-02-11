@@ -13,7 +13,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 
-
 load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -104,7 +103,7 @@ async def appeals_callback(call: types.CallbackQuery):
         messages_text = messages.get_message('select_action').text
         await call.message.edit_text(text=messages_text, reply_markup=builder.as_markup())
     except Exception as e:
-        print(e)
+        print(f'appeals_callback: {e.__str__()}')
         await send_error(call.message.chat.id)
 
 
@@ -112,16 +111,29 @@ async def appeals_callback(call: types.CallbackQuery):
 async def user_appeals(call: types.CallbackQuery):
     """ Show User Appeals handler """
     try:
-        user_data = user_cache.get(call.message.chat.id, {}).get('user_data', {})  # Безопасный доступ к данным
+        user_data = user_cache.get(call.message.chat.id, {}).get('user_data', {})
         user_cache[call.message.chat.id]['appeals'] = await appeal_service.get_user_appeals(user_data.get('id'))
         appeals = user_cache[call.message.chat.id]['appeals']
+
+        print(appeals)
+
+        appeals_filters = {}
+        for appeal in appeals:
+            if appeals_filters.get(appeal.get('case_caregory_id')) is None:
+                appeals_filters[appeal.get('case_caregory_id')] = {}
+                appeals_filters[appeal.get('case_caregory_id')]['name'] = appeal.get('case_caregory')
+                appeals_filters[appeal.get('case_caregory_id')]['count'] = 1
+            else:
+                appeals_filters[appeal.get('case_caregory_id')]['count'] += 1
+
+        user_cache[call.message.chat.id]['appeals_filters'] = appeals_filters
 
         builder = InlineKeyboardBuilder()
         buttons_in_row = 2
         temp_buttons = []
-        for appeal in appeals:
-            button_text = f"#{appeal.get('case_id')} {appeal.get('case_header')}"
-            button_data = f"appeal_{appeal.get('case_id')}_{user_data.get('id')}"
+        for category_id in appeals_filters:
+            button_text = f"{appeals_filters[category_id].get('name')}: {appeals_filters[category_id].get('count')}"
+            button_data = f'appeal_filter_{category_id}'
             temp_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=button_data))
 
             if len(temp_buttons) == buttons_in_row:
@@ -139,8 +151,46 @@ async def user_appeals(call: types.CallbackQuery):
         ])
         edited_repy_text = messages.get_message('total_appeals').text + str(len(appeals))
         await call.message.edit_text(text=edited_repy_text, reply_markup=builder.as_markup())
+
     except Exception as e:
-        print(e)
+        print(f'user_appeals: ', e)
+        await send_error(call.message.chat.id)
+
+
+@dp.callback_query(lambda call: call.data.startswith('appeal_filter_'))
+async def user_appeals_grouped(call: types.CallbackQuery):
+    try:
+        user_data = user_cache.get(call.message.chat.id, {}).get('user_data', {})
+        category_id = int(call.data.split('_')[-1])
+        appeals = [i for i in user_cache[call.message.chat.id]['appeals'] if i.get('case_caregory_id') == category_id]
+
+        builder = InlineKeyboardBuilder()
+        buttons_in_row = 2
+        temp_buttons = []
+        for appeal in appeals:
+            button_text = f"#{appeal.get('case_id')} {appeal.get('case_header')}"
+            button_data = f"appeal_{appeal.get('case_id')}_{user_data.get('id')}"
+            temp_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=button_data))
+
+            if len(temp_buttons) == buttons_in_row:
+                builder.row(*temp_buttons)
+                temp_buttons = []
+
+        if temp_buttons:
+            builder.row(*temp_buttons)
+
+        back_button = buttons.get_button('my_appeals')
+        start_button = buttons.get_button('start')
+        builder.row(*[
+            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
+        ])
+
+        category_name = user_cache[call.message.chat.id]['appeals_filters'].get(category_id).get('name')
+        edited_repy_text = f'{category_name}: {str(len(appeals))}'
+        await call.message.edit_text(text=edited_repy_text, reply_markup=builder.as_markup())
+    except Exception as e:
+        print(f'user_appeals_grouped: {e.__str__()}')
         await send_error(call.message.chat.id)
 
 
@@ -153,6 +203,7 @@ async def appeal_callback_handler(call: types.CallbackQuery):
         user_data = user_cache[call.message.chat.id]['user_data']
         appeals = user_cache[call.message.chat.id]['appeals']
         appeal = [i for i in appeals if appeal_id == str(i.get('case_id'))][0]
+        category_id = appeal.get('case_caregory_id')
 
         appeal_ticket = (f"Обращение #{appeal.get('case_number')}\n\n"
                          f"Тема: {appeal.get('case_header')}\nСтатуc: {appeal.get('case_status')}\n"
@@ -163,7 +214,6 @@ async def appeal_callback_handler(call: types.CallbackQuery):
         available_actions = actions.get_available_actions(user_data.get('role_id'), appeal.get('case_status_id'))
 
         builder = InlineKeyboardBuilder()
-        back_button = buttons.get_button('my_appeals')
         start_button = buttons.get_button('start')
 
         action_buttons = []
@@ -182,12 +232,11 @@ async def appeal_callback_handler(call: types.CallbackQuery):
             )])
 
         builder.row(*[
-            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text='<- Назад', callback_data=f'appeal_filter_{category_id}'),
             types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
         ])
 
         await call.message.edit_text(appeal_ticket, reply_markup=builder.as_markup())
-
     except Exception as e:
         print(f'appeal_callback_handler: {e.__str__()}')
         await send_error(call.message.chat.id)
@@ -217,12 +266,23 @@ async def process_message_to_user(message: types.Message, state: FSMContext):
         target_telegram_id = user_cache[message.chat.id]['message_to_user'].get('target_telegram_id')
 
         if message.text:
-            await bot.send_message(chat_id=target_telegram_id, text=message.text)
+            await bot.send_message(
+                chat_id=target_telegram_id,
+                text=message.text
+            )
         elif message.document:
-            await bot.send_document(chat_id=target_telegram_id, document=message.document.file_id, caption=message.caption)
+            await bot.send_document(
+                chat_id=target_telegram_id,
+                document=message.document.file_id,
+                caption=message.caption
+            )
         elif message.photo:
             photo_file_id = message.photo[-1].file_id
-            await bot.send_photo(chat_id=target_telegram_id, photo=photo_file_id, caption=message.caption)
+            await bot.send_photo(
+                chat_id=target_telegram_id,
+                photo=photo_file_id,
+                caption=message.caption
+            )
         else:
             await bot.send_message(message.chat.id, "Неподдерживаемый тип сообщения.")
             await state.clear()
@@ -230,7 +290,6 @@ async def process_message_to_user(message: types.Message, state: FSMContext):
 
         await bot.send_message(message.chat.id, 'Сообщение успешно отправлено пользователю')
         await state.clear()
-
     except Exception as e:
         print(f'process_message_to_user: {e.__str__()}')
         await send_error(message.chat.id)
@@ -239,19 +298,16 @@ async def process_message_to_user(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda call: call.data.startswith('procedure_'))
 async def appeal_procedure_callback_handler(call: types.CallbackQuery, state: FSMContext):
     try:
-        # print(call.data)
         user_data = user_cache[call.message.chat.id].get('user_data')
         user_role_id = user_data.get('role_id')
         user_id = user_data.get('id')
         call_data_items = call.data.split('_')
-        appeal_status_id = int(call_data_items[-1])
         appeal_id = int(call_data_items[1])
         procedure_id = int(call_data_items[2])
         action = actions.get_action_by_procedure_id(user_role_id, procedure_id)
-        # print(action[0])
 
         if len(action) == 0:
-            print('Не удалось выполнить действие!')
+            print('appeal_procedure_callback_handler: не удалось выполнить действие!')
             await send_error(call.message.chat.id)
             return
 
@@ -290,6 +346,7 @@ async def appeal_procedure_callback_handler(call: types.CallbackQuery, state: FS
             )
     except Exception as e:
         print(f'appeal_procedure_callback_handler: {e.__str__()}')
+        await send_error(call.message.chat.id)
 
 
 @dp.message(StateFilter(RegistrationStates.waiting_for_solution))
@@ -329,18 +386,18 @@ async def process_solution(message: types.Message, state: FSMContext):
             'text': text,
             'procedure': call_procedure,
         }
+
         if path is not None:
             solution_data['file'] = {
                 'path': path,
                 'name': name,
                 'extension': extension
             }
-        # print(solution_data)
+
         del user_cache[message.chat.id]['solution']
         await state.clear()
 
         response = await appeal_service.add_solution(solution_data)
-        print(response)
 
         button = buttons.get_button('my_appeals')
         builder = InlineKeyboardBuilder()
@@ -354,6 +411,7 @@ async def process_solution(message: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(RegistrationStates.waiting_for_clarification))
 async def process_clarification(message: types.Message, state: FSMContext):
+    """ Saving clarification in Appeal Event Log  """
     try:
         text = None
         path = None
@@ -390,16 +448,11 @@ async def process_clarification(message: types.Message, state: FSMContext):
 
         action = user_cache[message.chat.id].get('clarification').get('action')
         variables = user_cache[message.chat.id].get('clarification').get('variables')
-        # variables['event_id'] = '%s'
         procedure = action[0].get('procedure')
         params = {k: variables.get(v) for k, v in action[0].get('params').items()}
         call_procedure = f"public.{procedure}('{params.__str__().replace("'", '"')}'::jsonb)"
         user_clarification['procedure'] = call_procedure
-
-        print(user_clarification)
-
         response = await event_service.create_event(user_clarification)
-        print(response)
 
         del user_cache[message.chat.id]['clarification']
         await state.clear()
@@ -492,23 +545,36 @@ async def web_app_message_handler(message: types.Message):
 
 
 @dp.message(F.content_type == types.ContentType.DOCUMENT)
-async def file_handler(message: types.Message, bot: Bot):
+async def file_handler(message: types.Message):
     """ Saving filepath in user_cache """
     try:
-        file_id = message.document.file_id
-        file = await bot.get_file(file_id)
-        file_path = file.file_path
-        file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
+        path = None
+        name = None
+        extension = None
 
-        if user_cache[message.chat.id]:
+        if message.document:
+            file_id = message.document.file_id
+            name = message.document.file_name.split('.')[0]
+            extension = message.document.file_name.split('.')[-1]
+            file_path = await bot.get_file(file_id)
+            path = f"https://api.telegram.org/file/bot{bot.token}/{file_path.file_path}"
+
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            name = 'img'
+            extension = 'jpg'
+            file_path = await bot.get_file(file_id)
+            path = f"https://api.telegram.org/file/bot{bot.token}/{file_path.file_path}"
+
+        if user_cache.get(message.chat.id) and path is not None:
             user_cache[message.chat.id]['file'] = {
-                'path': file_url,
-                'name': message.document.file_name.split('.')[0],
-                'extension': message.document.file_name.split('.')[1]
+                'path': path,
+                'name': name,
+                'extension': extension
             }
 
     except Exception as e:
-        print(f'file_handler: {e}')
+        print(f'file_handler: {e.__str__()}')
         await bot.send_message(
             chat_id=message.chat.id,
             text='Не удалось сохранить файл',
@@ -545,37 +611,50 @@ async def create_new_appeal(call: types.CallbackQuery):
 @dp.callback_query(lambda call: call.data == buttons.get_button('link_telegram').data)
 async def link_telegram_profile(call: types.CallbackQuery, state: FSMContext):
     """ Email Request """
-    message_text = messages.get_message('email_enter').text
-    await bot.send_message(call.message.chat.id, message_text)
-    await state.set_state(RegistrationStates.waiting_for_email)
-    await call.answer()
+    try:
+        message_text = messages.get_message('email_enter').text
+        await bot.send_message(call.message.chat.id, message_text)
+        await state.set_state(RegistrationStates.waiting_for_email)
+        await call.answer()
+    except Exception as e:
+        print(f'link_telegram_profile: {e.__str__()}')
 
 
 @dp.message(StateFilter(RegistrationStates.waiting_for_email))
 async def process_email(message: types.Message, state: FSMContext):
     """
     Validate message contains Email address,
-    Send Mail if Email address exists,
-    Otherwise clear Email state and exit function
+    Send Mail if Email address exists
     """
     try:
         email = message.text
         if is_valid_email(email):
             user_data = await user_service.get_user_by_email(email)
-            if len(user_data) == 0:
+            print(user_data)
+
+            if user_data.get('code') == 404:
                 message_text = messages.get_message('email_not_found').text
                 await send_msg(message.chat.id, message_text)
+                print(message_text)
             else:
-                await user_service.send_confirm_email(message.chat.id, email)
-                message_text = messages.get_message('email_confirm').text
-                await message.reply(message_text)
-            await state.clear()
+                response = await user_service.send_confirm_email(message.chat.id, email)
+                print(response)
+                if response.get('code') == 200:
+                    message_text = messages.get_message('email_confirm').text
+                    await message.reply(message_text)
+                    await state.clear()
+                else:
+                    await bot.send_message(
+                        message.chat.id,
+                        f'Не удалось отправить письмо на почту {message.text}\nПопробуйте повторить запрос'
+                    )
         else:
             message_text = messages.get_message('email_not_valid').text
             await message.reply(message_text)
     except Exception as e:
-        print(e)
+        print(f'process_email: ', e)
         await state.clear()
+        await send_error(message.chat.id)
 
 
 def is_valid_email(email: str) -> bool:
@@ -600,7 +679,7 @@ async def send_register_button(chat_id: int):
         message_text = messages.get_message('telegram_not_found').text
         await send_msg(chat_id, message_text, builder.as_markup())
     except Exception as e:
-        print(e)
+        print(f'send_register_button: {e.__str__()}')
         await send_error(chat_id)
 
 
