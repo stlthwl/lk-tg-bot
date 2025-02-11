@@ -43,6 +43,7 @@ class RegistrationStates(StatesGroup):
     waiting_for_email = State()
     waiting_for_message_to_user = State()
     waiting_for_clarification = State()
+    waiting_for_solution = State()
 
 
 async def send_error(telegram_id):
@@ -260,7 +261,7 @@ async def appeal_procedure_callback_handler(call: types.CallbackQuery, state: FS
             'role_id': user_role_id
         }
 
-        if procedure_id in [55, 58, 61]:
+        if procedure_id in [55, 58, 61, 69]:
             await send_procedure_confirm_button(action, variables, call)
         elif procedure_id in [60, 67]:
             user_cache[call.message.chat.id]['clarification'] = {
@@ -277,9 +278,78 @@ async def appeal_procedure_callback_handler(call: types.CallbackQuery, state: FS
                 text='Введите текст уточнения, прикрепите файл при необходимости',
                 reply_markup=None
             )
-
+        elif procedure_id == 80:
+            user_cache[call.message.chat.id]['solution'] = {
+                'action': action,
+                'variables': variables
+            }
+            await state.set_state(RegistrationStates.waiting_for_solution)
+            await call.message.edit_text(
+                text='Введите текст решения, прикрепите файл при необходимости',
+                reply_markup=None
+            )
     except Exception as e:
         print(f'appeal_procedure_callback_handler: {e.__str__()}')
+
+
+@dp.message(StateFilter(RegistrationStates.waiting_for_solution))
+async def process_solution(message: types.Message, state: FSMContext):
+    try:
+        text = None
+        path = None
+        name = None
+        extension = None
+
+        if message.text:
+            text = message.text
+
+        if message.document:
+            text = message.caption
+            file_id = message.document.file_id
+            name = message.document.file_name.split('.')[0]
+            extension = message.document.file_name.split('.')[-1]
+            file_path = await bot.get_file(file_id)
+            path = f"https://api.telegram.org/file/bot{bot.token}/{file_path.file_path}"
+
+        if message.photo:
+            text = message.caption
+            file_id = message.photo[-1].file_id
+            name = 'img'
+            extension = 'jpg'
+            file_path = await bot.get_file(file_id)
+            path = f"https://api.telegram.org/file/bot{bot.token}/{file_path.file_path}"
+
+        action = user_cache[message.chat.id].get('solution').get('action')
+        variables = user_cache[message.chat.id].get('solution').get('variables')
+        procedure = action[0].get('procedure')
+        params = {k: variables.get(v) for k, v in action[0].get('params').items()}
+        call_procedure = f"public.{procedure}('{params.__str__().replace("'", '"')}'::jsonb)"
+        solution_data = {
+            'appeal_id': variables.get('appeal_id'),
+            'text': text,
+            'procedure': call_procedure,
+        }
+        if path is not None:
+            solution_data['file'] = {
+                'path': path,
+                'name': name,
+                'extension': extension
+            }
+        # print(solution_data)
+        del user_cache[message.chat.id]['solution']
+        await state.clear()
+
+        response = await appeal_service.add_solution(solution_data)
+        print(response)
+
+        button = buttons.get_button('my_appeals')
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text='Ок', callback_data=button.data))
+        await bot.send_message(message.chat.id, text=response.get('message'), reply_markup=builder.as_markup())
+
+    except Exception as e:
+        print(f'process_solution: {e.__str__()}')
+        await send_error(message.chat.id)
 
 
 @dp.message(StateFilter(RegistrationStates.waiting_for_clarification))

@@ -154,6 +154,16 @@ class Appeals:
         self.response = await send_post(payload)
         return self.response
 
+    async def add_solution(self, solution: dict):
+        payload = {
+            "data": {
+                "method": "add_solution",
+                "solution": solution
+            }
+        }
+        self.response = await send_post(payload)
+        return self.response
+
 
 class Events:
     def __init__(self):
