@@ -6,7 +6,7 @@ import urllib.parse
 from dotenv import load_dotenv
 from config import Messages, Buttons, Actions
 from api import User, Appeals, Events
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -43,6 +43,7 @@ class RegistrationStates(StatesGroup):
     waiting_for_message_to_user = State()
     waiting_for_clarification = State()
     waiting_for_solution = State()
+    waiting_for_appeal_file = State()
 
 
 async def send_error(telegram_id):
@@ -68,7 +69,7 @@ async def send_main_menu(chat_id: int, message: types.Message = None, call: type
     try:
         print(chat_id)
         user_data = await user_service.get_user_by_telegram_id(chat_id)
-        print(user_data)
+
         if len(user_data) == 0:
             await send_register_button(chat_id)
         else:
@@ -115,8 +116,6 @@ async def user_appeals(call: types.CallbackQuery):
         user_cache[call.message.chat.id]['appeals'] = await appeal_service.get_user_appeals(user_data.get('id'))
         appeals = user_cache[call.message.chat.id]['appeals']
 
-        print(appeals)
-
         appeals_filters = {}
         for appeal in appeals:
             if appeals_filters.get(appeal.get('case_caregory_id')) is None:
@@ -146,7 +145,7 @@ async def user_appeals(call: types.CallbackQuery):
         back_button = buttons.get_button('appeals')
         start_button = buttons.get_button('start')
         builder.row(*[
-            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text='Назад', callback_data=back_button.data),
             types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
         ])
         edited_repy_text = messages.get_message('total_appeals').text + str(len(appeals))
@@ -182,7 +181,7 @@ async def user_appeals_grouped(call: types.CallbackQuery):
         back_button = buttons.get_button('my_appeals')
         start_button = buttons.get_button('start')
         builder.row(*[
-            types.InlineKeyboardButton(text='<- Назад', callback_data=back_button.data),
+            types.InlineKeyboardButton(text='Назад', callback_data=back_button.data),
             types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
         ])
 
@@ -232,7 +231,7 @@ async def appeal_callback_handler(call: types.CallbackQuery):
             )])
 
         builder.row(*[
-            types.InlineKeyboardButton(text='<- Назад', callback_data=f'appeal_filter_{category_id}'),
+            types.InlineKeyboardButton(text='Назад', callback_data=f'appeal_filter_{category_id}'),
             types.InlineKeyboardButton(text=start_button.text, callback_data=start_button.data)
         ])
 
@@ -248,7 +247,6 @@ async def message_to_user_handler(call: types.CallbackQuery, state: FSMContext):
         appeal_id = int(call.data.split('-')[-1])
         appeals = user_cache[call.message.chat.id]['appeals']
         appeal = [i for i in appeals if appeal_id == i.get('case_id')][0]
-        print(appeal)
         user_cache[call.message.chat.id]['message_to_user'] = {
             'target_telegram_id': appeal.get('initiator_telegram_id')
         }
@@ -512,11 +510,11 @@ async def create_user_appeal(call: types.CallbackQuery):
 
         query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
         url = f"{base_url}?{query_string}"
-
         appeal_adding_btn = buttons.get_appeal_adding_button('appeal_adding', url)
         button = types.KeyboardButton(text=appeal_adding_btn.get('text'), web_app=appeal_adding_btn.get('web_app'))
         markup = types.ReplyKeyboardMarkup(keyboard=[[button]], resize_keyboard=True)
         message_text = messages.get_message('appeal_adding').text
+
         await send_msg(call.message.chat.id, message_text, reply_markup=markup)
     except Exception as e:
         print(e)
@@ -531,12 +529,18 @@ async def web_app_message_handler(message: types.Message):
         if data['method'] == 'create_new_appeal':
             data['user_id'] = user_cache[message.chat.id]['user_data']['id']
             user_cache[message.chat.id]['new_appeal'] = data
+
             builder = InlineKeyboardBuilder()
-            builder.add(types.InlineKeyboardButton(text='Да', callback_data='create_new_appeal'))
-            builder.add(types.InlineKeyboardButton(text='Отмена', callback_data='appeals'))
-            await bot.send_message(
+            builder.row(*[
+                types.InlineKeyboardButton(text='Прикрепить файл', callback_data='create_new_appeal_with_file'),
+                types.InlineKeyboardButton(text='Сохранить без файла', callback_data='create_new_appeal')
+            ])
+            button = buttons.get_button('appeals')
+            builder.row(*[types.InlineKeyboardButton(text='Отмена', callback_data=button.data)])
+
+            await send_msg(
                 message.chat.id,
-                text='Прикрепите файл при необходимости.\nСохранить?',
+                'Данные из формы получены, выберите действие',
                 reply_markup=builder.as_markup()
             )
     except Exception as e:
@@ -544,9 +548,19 @@ async def web_app_message_handler(message: types.Message):
         await send_error(message.from_user.id)
 
 
-@dp.message(F.content_type == types.ContentType.DOCUMENT)
-async def file_handler(message: types.Message):
-    """ Saving filepath in user_cache """
+@dp.callback_query(lambda call: call.data == 'create_new_appeal_with_file')
+async def create_new_appeal_with_file(call: types.CallbackQuery, state: FSMContext):
+    try:
+        await state.set_state(RegistrationStates.waiting_for_appeal_file)
+        await call.message.edit_text('Прикрепите файл')
+    except Exception as e:
+        print(f'create_new_appeal_with_file: {e.__str__()}')
+        await send_error(call.message.chat.id)
+
+
+@dp.message(StateFilter(RegistrationStates.waiting_for_appeal_file)) #create_new_appeal_with_file
+async def file_handler(message: types.Message, state: FSMContext):
+    """ Saving appeal file data in user cache """
     try:
         path = None
         name = None
@@ -573,6 +587,8 @@ async def file_handler(message: types.Message):
                 'extension': extension
             }
 
+        await create_new_appeal_with_file_handler(message)
+        await state.clear()
     except Exception as e:
         print(f'file_handler: {e.__str__()}')
         await bot.send_message(
@@ -582,17 +598,40 @@ async def file_handler(message: types.Message):
         )
 
 
+async def create_new_appeal_with_file_handler(message: types.Message):
+    try:
+        new_appeal = user_cache[message.chat.id].get('new_appeal')
+        if new_appeal is not None:
+            file_data = user_cache[message.chat.id].get('file')
+            if file_data is not None:
+                new_appeal['file'] = user_cache[message.chat.id].get('file')
+
+            response = await appeal_service.create_new_appeal(new_appeal)
+
+            builder = InlineKeyboardBuilder()
+            builder.add(types.InlineKeyboardButton(text='Ок', callback_data='appeals'))
+            await send_msg(
+                message.chat.id,
+                f"Обращение #{response[0]['case_number']} успешно добавлено!",
+                reply_markup=builder.as_markup()
+            )
+            await bot.send_message(
+                chat_id=int(os.getenv('GROUP_ID')),
+                text=f"Добавлено обращение #{response[0]['case_number']}\n\n"
+            )
+    except Exception as e:
+        print(f'create_new_appeal_with_file_handler: {e.__str__()}')
+        await send_error(message.chat.id)
+
+
 @dp.callback_query(lambda call: call.data == 'create_new_appeal')
 async def create_new_appeal(call: types.CallbackQuery):
     """ Saving New Appeal """
     try:
         new_appeal = user_cache[call.message.chat.id]['new_appeal']
         if new_appeal:
-            if 'file' in user_cache[call.message.chat.id]:
-                new_appeal['file'] = user_cache[call.message.chat.id]['file']
-
             response = await appeal_service.create_new_appeal(new_appeal)
-            print(response)
+
             builder = InlineKeyboardBuilder()
             builder.add(types.InlineKeyboardButton(text='Ок', callback_data='appeals'))
             await call.message.edit_text(
@@ -630,15 +669,12 @@ async def process_email(message: types.Message, state: FSMContext):
         email = message.text
         if is_valid_email(email):
             user_data = await user_service.get_user_by_email(email)
-            print(user_data)
 
             if user_data.get('code') == 404:
                 message_text = messages.get_message('email_not_found').text
                 await send_msg(message.chat.id, message_text)
-                print(message_text)
             else:
                 response = await user_service.send_confirm_email(message.chat.id, email)
-                print(response)
                 if response.get('code') == 200:
                     message_text = messages.get_message('email_confirm').text
                     await message.reply(message_text)

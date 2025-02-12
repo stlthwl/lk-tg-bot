@@ -38,8 +38,8 @@ class Buttons:
             'my_appeals': Button('Мои обращения', 'my_appeals'),
             'lk': Button('servicedesk', {'url': 'https://lk.bingosoft-office.ru/'}),
             'link_telegram': Button('Привязать учетную запись', 'link_telegram'),
-            'back_to_start': Button('<- Назад', '/start'),
-            'start': Button('<<-- В начало', '/start'),
+            'back_to_start': Button('Назад', '/start'),
+            'start': Button('В начало', '/start'),
             'appeal_adding': Button('Добавить обращение', None),
             'message_to_user': Button('Сообщение пользователю', 'message_to_user'),
             'message_to_support': Button('Сообщение в поддержку', 'message_to_support')
